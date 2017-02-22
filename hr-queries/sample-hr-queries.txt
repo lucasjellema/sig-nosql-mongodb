@@ -14,7 +14,17 @@ show collections
 
 db.emp.stats()
 
+-- find the names of all managers
+db.emp.find({"JOB":"MANAGER"},{ENAME:1})
 
+-- find all salesmen, listed by salary descending
+db.emp.find({"JOB":"SALESMAN"},{ENAME:1, SAL:1}).sort({'SAL':-1}) 
+
+-- find all salesmen, listed by salary descending; only top 2
+db.emp.find({"JOB":"SALESMAN"},{ENAME:1, SAL:1}).sort({'SAL':-1}).limit(2)
+
+
+-- list all employees (empno and ename) along with the looked up department
 
 db.emp.aggregate(
 [  {$lookup:
@@ -33,4 +43,29 @@ db.emp.aggregate(
     }
 ]
 )
+
+-- list all departments with the list of their employees (name only)
+db.dept.aggregate(
+[  {$lookup:
+      {
+         from:"emp",
+         localField:"deptno",
+         foreignField:"DEPTNO",
+         as:"emps"
+     }
+   }  
+, {$project: {
+        "deptno": 1,
+        "dname": 1,
+        "staff": { $reduce: {
+                            input: "$emps",
+                            initialValue: "",
+                            in: { $concat : ["$$value", ", ","$$this.ENAME"] }
+                           }
+                 },
+    }
+  }
+]
+)
+
 
