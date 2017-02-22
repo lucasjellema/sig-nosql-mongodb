@@ -1,0 +1,284 @@
+-- this file contains the SQL counterparts for the NoSQL MongoDB queries in the sample-country-queries.txt document
+
+-- Filtering on specific countries is easy to do. For example, to list all countries in (the continent) Europe, type:
+select *
+from   countries
+where  continent = 'Europe'
+
+
+
+-- To only list the name of these countries:
+
+select name
+from   countries
+where  continent = 'Europe'
+
+
+-- To find countries with the substring ma in their name, one of the statement to write is:
+
+select name
+from   countries
+where  continent = 'Europe'
+and    name like '%ma%'
+
+-- Distinct continents in the world database's countries collection:
+
+select distinct continent 
+from   countries
+
+
+-- To find the largest three countries in Africa, use sort - to order by size - and limit - to return the top 3 from the sort result:
+
+select name,area from countries where continent = 'Africa' order by area desc FETCH FIRST 3 ROWS ONLY
+
+
+-- Aggregation
+
+-- The number of countries per continent:
+select continent
+,      count(*) 
+from   countries 
+group by continent
+
+--The largest country in each continent:
+
+select continent
+,      MAX(name) KEEP (DENSE_RANK FIRST ORDER BY area desc) as "largest country" 
+from   countries 
+group 
+by     continent
+
+
+-- query the name in uppercase, delta between birthdate and deathrate, population density for countries in Oceania
+
+select upper(name), birthrate - deathrate as populationGrowthRate, trunc(population/area) as populationDensity 
+from countries 
+where continent = 'Oceania'
+
+
+-- find the top 3 country size for each continent.
+select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+
+-- create a new collection - similar to a materialized view - from a query, using the $out operator as the last stage in the aggregation pipeline.
+
+create materialized view top3percontinent 
+BUILD IMMEDIATE 
+REFRESH FORCE
+ON DEMAND
+AS
+select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+
+
+--  query the largest country for each continent:
+
+with top3percontinent 
+AS
+(select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+)
+select *
+from   top3percontinent
+where  rnk = 1
+
+-- construct a list of the 5 largest countries in the world:
+
+with top3percontinent 
+AS
+(select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+)
+select * 
+from   top3percontinent  
+order by area desc 
+FETCH FIRST 5 ROWS ONLY
+
+-- Find countries and for each country its intra-continental top3 rank by size - if it has one:
+
+with top3percontinent 
+AS
+(select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+)
+select c.continent
+,      t.rnk as countryTop3SizeRank
+,      c.name
+,      c.area
+,      c.population 
+from   countries c 
+       left outer join 
+       top3percontinent  t 
+       on (c.name = t.name)
+
+
+-- analyze our countries along several dimensions: how many per continent, per population size (using arbitrary boundaries between categories), how many per government form and  automatic distribution of buckets for the country size 
+
+select continent
+,      count(*)
+from   countries
+group
+by     continent
+
+
+with bucket_boundaries as
+( select 10000 lower_boundary from dual
+  union all
+  select 100000 lower_boundary from dual
+  union all
+  select 1000000 lower_boundary from dual
+  union all
+  select 5000000 lower_boundary from dual
+  union all
+  select 10000000 lower_boundary from dual
+  union all
+  select 25000000 lower_boundary from dual
+  union all
+  select 50000000 lower_boundary from dual
+  union all
+  select 250000000 lower_boundary from dual
+  union all
+  select 2000000000 lower_boundary from dual
+)
+, buckets as
+( select lower_boundary
+  ,      lead(lower_boundary) over (order by lower_boundary)-1 upper_boundary
+  from   bucket_boundaries
+)
+select lower_boundary
+,      count(*)
+from   countries
+       left outer join
+       buckets
+       on (population between lower_boundary and upper_boundary)
+group
+by     lower_boundary
+
+
+select GOVERNMENT_FORM
+,      count(*)
+from   countries
+group
+by     GOVERNMENT_FORM
+
+with tiled as
+( select name as country
+  ,      area
+  ,      ntile(6)  over (order by area asc) as size_bucket
+  from   countries
+)
+select size_bucket
+,      MIN(area) lower_boundary
+,      MAX(area) upper_boundary
+,      listagg( country, ',') within group (order by area)
+from   tiled
+group
+by     size_bucket
+order
+by     size_bucket
+
+
+-- For all countries in a top 3 position a list of the countries that have the same position in the top 3 of their respective continents. Note: using multiset, listagg, collect etc. we can create collections of the same_rankers
+
+  with top3percontinent 
+AS
+(select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+)
+select t.* 
+, (cursor ( select t2.* from top3percontinent  t2 where t2.rnk = t.rnk)) as sameRankers 
+from top3percontinent t 
+
+
+
+-- A self-join as shown in the previous example can be used for counterparts to the lag() and lead() operations in SQL. We take the top3 ranked countries in the top3percontinent  collection. We join each country with the other countries in that same continent's top3. After the lookup, each document contains a country and an array of three countries. From this array, we take the previous (if there is one) and the next (if that exists) country compared to the current country's own rank, to get the countries it is lagging and leading respectively.
+
+with top3percontinent 
+AS
+(select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+)
+select t.continent
+,      t.rnk
+,      t.name country
+,      lead(name) over (partition by continent order by area desc) leading
+,      lag(name) over (partition by continent order by area desc) lagging
+from top3percontinent t 
+
+
+-- (calculate average size for all countries in the top3 for the continent of the current country)
+
+with top3percontinent 
+AS
+(select * 
+from ( select name
+       , continent
+       , row_number() over (partition by continent order by area desc) rnk
+       , area 
+       from countries
+    ) 
+where rnk <4 
+order 
+by    continent, rnk
+)
+select t.continent
+,      t.rnk
+,      t.name country
+,      avg(area) over (partition by continent) average_top3_size
+from top3percontinent t 
