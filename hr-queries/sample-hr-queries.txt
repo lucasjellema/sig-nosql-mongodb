@@ -15,6 +15,8 @@ show collections
 
 db.emp.stats()
 
+-- find inspiration for queries at https://www.scribd.com/doc/24313549/Oracle-SQL-Queries-on-Emp-Table-1-to-235 
+
 -- find the names of all managers
 db.emp.find({"JOB":"MANAGER"},{ENAME:1})
 
@@ -24,7 +26,11 @@ db.emp.find({"JOB":"SALESMAN"},{ENAME:1, SAL:1}).sort({'SAL':-1})
 -- find all salesmen, listed by salary descending; only top 2
 db.emp.find({"JOB":"SALESMAN"},{ENAME:1, SAL:1}).sort({'SAL':-1}).limit(2)
 
+-- find all employees with AR in their name, sorted by name
+db.emp.find({"ENAME":{$regex: "AR"} },{ENAME:1, SAL:1}).sort({'ENAME':1})
 
+-- find all employees who are not in department 10
+db.emp.find({"DEPTNO":{$ne: 10} },{ENAME:1, SAL:1, DEPTNO:1}).sort({'ENAME':1})
 
 
 -- list all employees (empno and ename) along with the looked up department
@@ -71,4 +77,24 @@ db.dept.aggregate(
 ]
 )
 
+-- all employees who work in NEW YORK (after adding DEPT through lookup to each EMP)
+
+db.emp.aggregate(
+[  {$lookup:
+      {
+         from:"dept",
+         localField:"DEPTNO",
+         foreignField:"deptno",
+         as:"dept"
+     }
+   }  
+, {$project: {
+        "EMPNO": 1,
+        "ENAME": 1,
+        "DEPT": { $arrayElemAt:["$dept", 0]},
+      }
+    }
+, {$match: {  "DEPT.loc" :"NEW YORK"} }
+]
+)
 
