@@ -1,0 +1,3 @@
+deptno
+dname
+loc

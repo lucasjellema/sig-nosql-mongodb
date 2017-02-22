@@ -1,0 +1,36 @@
+-- import the HR records into the local MongoDB server (database hr and collections emp and dept)
+-- note: the data is based on EMP and DEPT tables in SCOTT sample schema that used to be popular with Oracle Database 
+
+mongoimport --host 127.0.0.1:27017 --db hr --collection emp --drop --file export_emp.csv  --type csv --fieldFile empFields.txt
+mongoimport --host 127.0.0.1:27017 --db hr --collection dept --drop --file export_dept.csv  --type csv --fieldFile deptFields.txt
+
+"C:\Program Files\MongoDB\Server\3.4\bin\mongoimport" --host 127.0.0.1:27017 --db hr --collection dept --drop --file export_dept.csv  --type csv --fieldFile deptFields.txt
+
+-- run the mongodb shell
+
+use hr
+
+show collections
+
+db.emp.stats()
+
+
+
+db.emp.aggregate(
+[  {$lookup:
+      {
+         from:"dept",
+         localField:"DEPTNO",
+         foreignField:"deptno",
+         as:"dept"
+     }
+   }  
+, {$project: {
+        "EMPNO": 1,
+        "ENAME": 1,
+        "DEPT": { $arrayElemAt:["$dept", 0]},
+      }
+    }
+]
+)
+
