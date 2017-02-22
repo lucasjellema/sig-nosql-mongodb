@@ -141,6 +141,46 @@ db.countries.aggregate(
 ]
 )
 
+-- in aggregations, we can make use of $facet.
+-- here we use the facet operator to analyze our countries along several dimensions: how many per continent, per population size (using arbitrary boundaries between categories), how many per government form and  automatic distribution of buckets for the country size 
+
+db.countries.aggregate( [
+  {
+    $facet: {
+      "categorizedByContinent": [
+        { $sortByCount: "$continent" }
+      ],
+     "categorizedByPopulation": [
+        // Filter out countries  without a population
+        { $match: { population: { $exists: 1 } } },
+        {
+          $bucket: {
+            groupBy: "$population",
+            boundaries: [10000, 100000, 1000000 ,5000000 ,10000000, 25000000, 50000000, 200000000, 2000000000 ],
+            default: "Other",
+            output: {
+              "count": { $sum: 1 },
+              "countries": { $push: "$name" }
+            }
+          }
+        }
+      ],
+      "categorizedByGovernmentForm": [
+        { $sortByCount: "$governmentForm" }
+      ],
+      "categorizedBySize(Auto)": [
+        {
+          $bucketAuto: {
+            groupBy: "$area",
+            buckets: 6
+          }
+        }
+      ]
+    }
+  }
+])
+
+
 -- A lookup can join to multiple elements. These are collected into a single array. For example, this query produces for all documents in the top3percontinent collection an array of the countries in that same collection - so this is an auto join or self join on the countryRank field - that have the same value for countryRank.
 
 
