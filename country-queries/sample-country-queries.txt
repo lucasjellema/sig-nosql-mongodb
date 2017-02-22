@@ -1,0 +1,228 @@
+-- import the country records into the local MongoDB server (database world and collection countries)
+-- note: the data is downloaded from https://www.laenderdaten.info/downloads/ 
+
+mongoimport --host 127.0.0.1:27017 --db world --collection countries --drop --file countries.csv  --type csv --fieldFile countriesFields.txt
+
+"C:\Program Files\MongoDB\Server\3.4\bin\mongoimport" --host 127.0.0.1:27017 --db world --collection countries --drop --file countries.csv  --type csv --fieldFile countriesFields.txt
+
+-- run the mongodb shell
+
+use world
+
+show collections
+
+db.countries.stats()
+
+db.countries.find()
+
+
+-- Filtering on specific countries is easy to do. For example, to list all countries in (the continent) Europe, type:
+
+db.countries.find({"continent":"Europe"})
+
+-- To only list the name of these countries:
+
+db.countries.find({"continent":"Europe"},{name:1})
+
+-- you will also get the ObjectId for free.You can suppress it like this:
+
+db.countries.find({"continent":"Europe"},{name:1, _id:0})
+
+-- To find countries with the substring ma in their name, one of the statement to write is:
+
+db.countries.find({"continent":"Europe","name":{$regex:"ma"}},{name:1, _id:0})
+
+-- Distinct continents in the world database's countries collection:
+
+db.countries.distinct("continent")
+
+
+-- To find the largest three countries in Africa, use sort - to order by size - and limit - to return the top 3 from the sort result:
+
+db.countries.find({"continent":"Africa"},{name:1,area:1, _id:0}).sort({'area':-1}).limit(3)
+
+
+-- Aggregation
+
+-- The number of countries per continent:
+
+db.countries.aggregate(
+[ {$group:{ _id: '$continent'
+          , countryCount : {$sum:1}
+          }
+  }
+]
+)
+
+--The largest country in each continent:
+
+db.countries.aggregate(
+[  {$sort: {area : -1}}
+,  {$group:{ _id: '$continent'
+          , largestCountry : {$first: "$name"}
+          }
+  }
+]
+)
+
+
+-- query the name in uppercase, delta between birthdate and deathrate, population density for countries in Oceania
+
+db.countries.aggregate(
+[ {$match: {continent:"Oceania"}}
+, {$project:
+  { name :{$toUpper:"$name"}
+  , populationGrowthRate : {$subtract: ["$birthrate","$deathrate"]}
+  , populationDensity : {$trunc :{$divide: ["$population","$area"]}}
+  }
+}
+])
+
+
+-- find the top 3 country size for each continent.
+
+db.countries.aggregate(
+[
+  { $sort: {area : -1}}
+  , {$group:{ _id: '$continent'
+            , countries: {$push : { country :"$name", area:"$area"}}
+            }
+    }
+, {$unwind: {path:"$countries", includeArrayIndex:"countryRank"}}  
+, {$match: { countryRank: {$lt : 3}}}
+, {$project : { _id: {$concat: ["$_id",".","$countries.country"]}, countryRank:1, continent: "$_id", country: "$countries.country", size:"$countries.area"}}
+]
+)
+
+-- create a new collection - similar to a materialized view - from a query, using the $out operator as the last stage in the aggregation pipeline.
+
+db.countries.aggregate(
+[
+  { $sort: {area : -1}}
+  , {$group:{ _id: '$continent'
+            , countries: {$push : { country :"$name", area:"$area"}}
+            }
+    }
+, {$unwind: {path:"$countries", includeArrayIndex:"countryRank"}}  
+, {$match: { countryRank: {$lt : 3}}}
+, {$project : { _id: {$concat: ["$_id",".","$countries.country"]}, countryRank:1, continent: 1, country: "$countries.country", size:"$countries.area"}}
+, {$out : "top3percontinent"}
+]
+)
+
+--  query the largest country for each continent:
+
+db.top3percontinent.find({countryRank:0})
+
+-- construct a list of the 5 largest countries in the world:
+
+db.top3percontinent.find().sort({'size':-1}).limit(5)
+
+
+-- Find countries and for each country its intra-continental top3 rank by size - if it has one:
+
+db.countries.aggregate(
+[  {$lookup:
+      {
+         from:"top3percontinent",
+         localField:"name",
+         foreignField:"country",
+         as:"top3Entry"
+     }
+   }  
+, {$project: {
+        "continent": 1,
+        "countryTop3SizeRank": "$top3Entry.countryRank",
+        "name": 1,
+        "area": 1,
+        "population": 1,
+      }
+    }
+]
+)
+
+-- A lookup can join to multiple elements. These are collected into a single array. For example, this query produces for all documents in the top3percontinent collection an array of the countries in that same collection - so this is an auto join or self join on the countryRank field - that have the same value for countryRank.
+
+
+db.top3percontinent.aggregate(
+[  {$lookup:
+      {
+         from:"top3percontinent",
+         localField:"countryRank",
+         foreignField:"countryRank",
+         as:"sameRankers"
+     }
+   } 
+])
+
+-- A self-join as shown in the previous example can be used for counterparts to the lag() and lead() operations in SQL. We take the top3 ranked countries in the top3percontinent  collection. We join each country with the other countries in that same continent's top3. After the lookup, each document contains a country and an array of three countries. From this array, we take the previous (if there is one) and the next (if that exists) country compared to the current country's own rank, to get the countries it is lagging and leading respectively.
+
+db.top3percontinent.aggregate(
+[  {$lookup:
+      {
+         from:"top3percontinent",
+         localField:"continent",
+         foreignField:"continent",
+         as:"fellowTop3"
+     }
+   }  
+, {
+      $project: {
+        "continent": 1,
+        "countryRank": 1,
+        "country": 1,
+        "lead": { $cond: { if: { $lt: ["$countryRank",  2 ] }
+                                     , then: { $arrayElemAt: [ "$fellowTop3", {$add: ["$countryRank", 1 ]}] }
+                                     , else: null
+                                     }
+                            },
+        "lag": { $cond: { if: { $gt: ["$countryRank",  0 ] }
+                                     , then: { $arrayElemAt: [ "$fellowTop3", {$subtract: ["$countryRank", 1 ]}] }
+                                     , else: null
+                                     }
+                            },
+      }
+    }
+])
+
+
+-- $reduce for aggregating over the array that results from a self join with multiple elements 
+-- (calculate average size for all countries in the top3 for the continent of the current country)
+
+db.top3percontinent.aggregate(
+[  {$lookup:
+      {
+         from:"top3percontinent",
+         localField:"continent",
+         foreignField:"continent",
+         as:"fellowTop3"
+     }
+   }  
+, {
+      $project: {
+        "continent": 1,
+        "countryRank": 1,
+        "country": 1,
+        "size": 1,
+        "top3": {
+            $reduce: {
+              input: "$fellowTop3",
+              initialValue: {index:0, total:0},
+              in: {
+                    index: { $add: ["$$value.index",  1]}
+                   , total: { $add: ["$$value.total",  "$$this.size"]}
+              }
+            }
+        },
+      }
+    }
+, {
+      $project: {
+        "continent": 1,
+        "countryRank": 1,
+        "country": 1,
+        "size": 1,
+        "average_top3_size": {$trunc: {  $divide: ["$top3.total","$top3.index"]}},
+      }
+    }
+])

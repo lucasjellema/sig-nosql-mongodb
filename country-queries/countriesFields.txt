@@ -1,0 +1,16 @@
+name
+code
+continent
+capital
+population
+area
+coastline
+governmentForm
+currency
+currencyCode
+dialingPrefix
+birthrate
+deathrate
+liveExpectancy
+url
+
