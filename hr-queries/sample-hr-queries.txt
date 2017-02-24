@@ -101,6 +101,65 @@ squareThis(10);
 -- not in aggregate and find
 
 
+-- some aggregates
+
+db.emp.aggregate(
+[{
+     $group: {
+        _id: null,
+          total_salary_sum: { $sum: "$SAL" }
+        , total_staff_count: { $sum: 1 }
+        , max_sal: { $max: "$SAL" }
+        , min_startdate: { $min: "$startdate" }
+     }
+   }
+]
+)
+
+-- by department
+db.emp.aggregate(
+[{
+     $group: {
+        _id: "$DEPTNO",
+          total_salary_sum: { $sum: "$SAL" }
+        , total_staff_count: { $sum: 1 }
+        , max_sal: { $max: "$SAL" }
+        , min_startdate: { $min: "$startdate" }
+     }
+   }
+]
+)
+
+-- by department and hireyear
+db.emp.aggregate(
+[{
+     $group: {
+        _id: { deptno: "$DEPTNO", hireyear : {  $year: "$startdate"} },
+          total_salary_sum: { $sum: "$SAL" }
+        , total_staff_count: { $sum: 1 }
+        , max_sal: { $max: "$SAL" }
+        , min_startdate: { $min: "$startdate" }
+     }
+   }
+]
+)
+
+
+-- by department and hireyear
+-- having more than one staff
+db.emp.aggregate(
+[{
+     $group: {
+        _id: { deptno: "$DEPTNO", hireyear : {  $year: "$startdate"} },
+          total_salary_sum: { $sum: "$SAL" }
+        , total_staff_count: { $sum: 1 }
+        , max_sal: { $max: "$SAL" }
+        , min_startdate: { $min: "$startdate" }
+     }
+   }
+,   { $match: { total_staff_count: { $gt: 1 } } }
+]
+)
 
 
 -- list all employees (empno and ename) along with the looked up department
