@@ -79,6 +79,7 @@ db.dept.aggregate(
 
 -- all employees who work in NEW YORK (after adding DEPT through lookup to each EMP)
 
+
 db.emp.aggregate(
 [  {$lookup:
       {
@@ -98,3 +99,33 @@ db.emp.aggregate(
 ]
 )
 
+
+
+-- all employees who work (directly) for KING
+
+db.emp.aggregate(
+[ 
+ {$match: { ENAME: "KING"}}
+, {$lookup:
+      {
+         from:"emp",
+         localField:"EMPNO",
+         foreignField:"MGR",
+         as:"subordinates"
+     }
+   }  
+, {$project: {
+        "EMPNO": 1,
+        "ENAME": 1,
+        "subordinates": 1,
+        // "firstStaff": { $arrayElemAt:["$staff", 0]},
+        "staff": { $reduce: {
+                            input: "$subordinates",
+                            initialValue: "",
+                            in: { $concat : ["$$value", ", ","$$this.ENAME"] }
+                           }
+                 },
+      }
+    }
+]
+)
