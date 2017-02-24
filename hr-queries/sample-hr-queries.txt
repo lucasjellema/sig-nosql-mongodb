@@ -32,6 +32,76 @@ db.emp.find({"ENAME":{$regex: "AR"} },{ENAME:1, SAL:1}).sort({'ENAME':1})
 -- find all employees who are not in department 10
 db.emp.find({"DEPTNO":{$ne: 10} },{ENAME:1, SAL:1, DEPTNO:1}).sort({'ENAME':1})
 
+-- add a Date style property for hiredate
+-- https://docs.mongodb.com/manual/reference/method/Date/, 
+-- new Date("<YYYY-mm-dd>")
+-- update documents based on values in document themselves
+
+  db.emp.find().forEach(
+      function (elem) {
+        elem.startdate = new Date( "19"+ elem.HIREDATE.substring(6)
+                       + "-" + elem.HIREDATE.substring(3,5)
+                       + "-" + elem.HIREDATE.substring(0,2) 
+                       );
+        // don't forget to save the updated document
+        db.emp.save(elem);
+      }
+    )
+
+-- at this point, emp collection has documents with a startdate property that is a real Date() and not a string that looks like a date.
+-- throw out the HIREDATE property
+
+db.emp.update({}, { $unset: {HIREDATE : ""} })
+
+
+-- list everyone hired after January 1st 1983 or later
+db.emp.find(
+{"startdate" :{$gt: new Date('1983-01-01') }}
+)
+
+-- list everyone hired in 1983 or later
+db.emp.find(
+{"startdate" :{$gt: new Date('1983') }}
+)
+
+
+-- using the aggregate framework we can use date and time operators like this https://smyl.es/how-to-use-mongodb-date-aggregation-operators-in-node-js-with-mongoose-dayofmonth-dayofyear-dayofweek-etc/ 
+
+db.emp.aggregate(
+ [ 
+  {$project: {
+        "ENAME": 1,
+        "JOB": 1,
+        "startdate": 1,
+        "startmonth": { $month: "$startdate"}
+    }
+  }
+]
+)
+
+
+use hr
+
+-- create stored function
+
+db.system.js.save({ 
+   "_id": "squareThis", 
+   "value": function(a) { return a*a } 
+})
+
+-- load function in current database
+
+db.loadServerScripts();
+
+-- invoke function in the shell
+
+squareThis(10);
+
+-- note: functions can be invoked in $where and $mapReduce
+-- not in aggregate and find
+
+
+
 
 -- list all employees (empno and ename) along with the looked up department
 
@@ -77,9 +147,9 @@ db.dept.aggregate(
 ]
 )
 
+
+
 -- all employees who work in NEW YORK (after adding DEPT through lookup to each EMP)
-
-
 db.emp.aggregate(
 [  {$lookup:
       {
@@ -129,3 +199,42 @@ db.emp.aggregate(
     }
 ]
 )
+
+
+-- in aggregations, we can make use of $facet.
+-- here we use the facet operator to analyze our employees along several dimensions:  
+-- JOB, SAL, DEPTNO and startdate
+
+db.emp.aggregate( [
+  {
+    $facet: {
+      "categorizedByJob": [
+        { $sortByCount: "$JOB" }
+      ],
+     "categorizedBySalary": [
+        {
+          $bucket: {
+            groupBy: "$SAL",
+            boundaries: [0, 1000, 2000 ,3000 ,10000 ],
+            default: "Other",
+            output: {
+              "count": { $sum: 1 },
+              "employees": { $push: "$ENAME" }
+            }
+          }
+        }
+      ],
+      "categorizedByDepartment": [
+        { $sortByCount: "$DEPTNO" }
+      ],
+      "categorizedByHiredate(Auto)": [
+        {
+          $bucketAuto: {
+            groupBy: "$startdate",
+            buckets: 4
+          }
+        }
+      ]
+    }
+  }
+])
