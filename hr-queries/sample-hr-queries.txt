@@ -480,3 +480,109 @@ db.dept.aggregate([
    }
 ])
 
+-- text search
+db.emp.findAndModify({
+    query: { ENAME: "KING" },
+    update: { $set: { "bio" : "Gerald Ford was born on July 14, 1913, in Omaha, Nebraska, as Leslie Lynch King Jr. In just weeks, he was whisked away by his mother, Dorothy Ayer Gardner, to her parents' home in Grand Rapids, Michigan. A plucky woman who would not tolerate abuse, she divorced his father, Leslie Lynch King Sr., within the year, and less than three years later, was married to Gerald Rudolff Ford, a local paint company salesman, from whence Jerry Jr. got his name—although it was not made legal until he was 22 years old. A star college football player, he served in the Navy during WWII. Elected to the House of Representatives in 1948, Ford represented Michigan's 5th District for nearly 25 years before suddenly finding himself at the crossroads of history. He was elevated to vice president, and then became the 38th U.S. president due to Richard Nixon's involvement in the Watergate scandal and subsequent resignation. Ford was defeated by Jimmy Carter in the 1976 election. He died in California in 2006." }
+            },
+    upsert: true
+})
+
+
+db.emp.findAndModify({
+    query: { ENAME: "BLAKE" },
+    update: { $set: { "bio" : "Jamaican sprinter Yohan Blake holds the world record for the 4-by-100-meter relay. In 2012, he won a silver medal in both the 100-meter and 200-meter races, losing to rival and fellow Jamaican Usain Bolt in both events. Famed sprinter Yohan Blake, nicknamed 'The Beast' by fans, was born on December 26, 1989 in St. James, Jamaica. Blake began running competitively in the 100 and 200 meters at a young age. In 2009, he tested positive for methylaxanthine at the Jamaican Championships, and was banned for three months. He has since won various honors, including two gold medals at the 2011 World Championships, in the 100 and the 4-by-100-meter relay. Blake holds the record in the 4-by-100-meter relay and the national junior record in the 100. His best time in the 100 is 9.75 seconds. At the 2012 Summer Olympics, he won a silver medal in the 100 meters with a time of 9.75 seconds, just shy of his rival Usain Bolt's 9.63 seconds. Similarly, in the 200-meter race, Blake finished second to Bolt, taking the silver." }
+            },
+    upsert: true
+})
+
+
+
+db.emp.findAndModify({
+    query: { ENAME: "FORD" },
+    update: { $set: { "bio" : "Harrison Ford is one of Hollywood's leading men, with an acting career that has spanned nearly 40 years and included iconic roles such as Indiana Jones and Han Solo." }
+            },
+    upsert: true
+})
+
+db.emp.findAndModify({
+    query: { ENAME: "JONES" },
+    update: { $set: { "bio" : "Tom Jones is a Welsh rock, pop and soul singing legend best known as an international hit maker over the last five decades. His popular singles include \"It's Not Unusual,\" \"Green Green Grass of Home,\" \"Delilah,\" \"Till\" and \"A Boy From Nowhere.\"" }
+            },
+    upsert: true
+})
+
+
+
+db.emp.findAndModify({
+    query: { ENAME: "ADAMS" },
+    update: { $set: { "bio" : "American Founding Father Samuel Adams helped organize the Boston Tea Party and signed the U.S. Declaration of Independence. Samuel Adams was born on September 27, 1722, in Boston, Massachusetts. A strong opponent of British taxation, Adams helped formulate resistance to the Stamp Act and played a vital role in organizing the Boston Tea Party. He was a second cousin of U.S. President John Adams, with whom he urged a final break from Great Britain, and a signee of the U.S. Declaration of Independence. Adams died on October 2, 1803, in Boston." }
+            },
+    upsert: true
+})
+
+db.emp.findAndModify({
+    query: { ENAME: "JAMES" },
+    update: { $set: { "bio" : "King James IV unified Scotland under his rule, provided laws, advanced culture and learning and positioned the country as a major player in European politics. King of Scotland from 1488 to 1513, James IV unified the country under his rule through enforcement and political and cultural advancements. While Scotland had a tense relationship with England under King Henry VII, relations improved with James’s marriage to Henry’s daughter, Margaret Tudor. The tide reversed when James allied himself with England’s arch enemy, France, and went to war with Henry VIII. James was killed in the Battle of Flodden on September 9, 1513." }
+            },
+    upsert: true
+})
+
+db.emp.findAndModify({
+    query: { ENAME: "MILLER" },
+    update: { $set: { "bio" : "Bandleader Glenn Miller inspired the World War II generation and boosted morale with many popular songs. Born in 1904 in Iowa, bandleader and musician Glenn Miller inspired the World War II generation. He was one of the most popular bandleaders in the late 1930s and early 1940s with such songs as \"Moonlight Serenade\" and \"Tuxedo Junction.\" In 1942, Miller enlisted in the U.S. Army and was assigned to lead the Army Air Force Band. He boosted the morale of the troops with his many popular songs before mysteriously disappearing on a flight from England to Paris, France. Miller's original recordings continue to sell millions of copies. He died on December 15, 1944." }
+            },
+    upsert: true
+})
+
+
+-- create text index 
+
+db.emp.createIndex(
+{ ENAME:'text', 
+  JOB:'text',
+  BIO:'text',
+}
+,{  weights: { ENAME:10, JOB:5, bio:1}
+  , name: 'employee_text_index'  
+}
+)
+
+
+-- search using text index
+
+-- which employees are found when looking for someone to lead? And what about acting? or managing?
+db.emp.find({$text: {$search: 'lead'}},{ENAME:1})
+
+-- which employees are found for the search string Ford? (one is obvious, the other less so)
+-- (note: when looking for fording or forded or fords, the same results are retrieved, thanks to stemming) 
+db.emp.find({$text: {$search: 'ford'}},{ENAME:1})
+
+
+-- text search scores
+
+db.emp.aggregate(
+     [
+         { $match: { $text: { $search: 'managing' } } },
+         { $project: {_id:0,ENAME: 1, score: { $meta: 'textScore' } } },
+         { $sort: {score:-1} }
+     ]
+ )
+
+ db.emp.aggregate(
+     [
+         { $match: { $text: { $search: 'king' } } },
+         { $project: {_id:0,ENAME: 1, score: { $meta: 'textScore' } } },
+         { $sort: {score:-1} }
+     ]
+ )
+
+-- check out how much more than scores than the other when looking at the text scores 
+ db.emp.aggregate(
+     [
+         { $match: { $text: { $search: 'forded' } } },
+         { $project: {_id:0,ENAME: 1, score: { $meta: 'textScore' } } },
+         { $sort: {score:-1} }
+     ]
+ )
+ 
