@@ -29,7 +29,7 @@ db.emp.find({"JOB":"SALESMAN"},{ENAME:1, SAL:1}).sort({'SAL':-1}).limit(2)
 -- find all employees with AR in their name, sorted by name
 db.emp.find({"ENAME":{$regex: "AR"} },{ENAME:1, SAL:1}).sort({'ENAME':1})
 
--- find all employees who are not in department 10
+-- find all employees who are not in department 10, with their name and salary and sorted alphabetically by name
 db.emp.find({"DEPTNO":{$ne: 10} },{ENAME:1, SAL:1, DEPTNO:1}).sort({'ENAME':1})
 
 -- add a Date style property for hiredate
@@ -102,7 +102,7 @@ squareThis(10);
 
 
 -- some aggregates
-
+-- total salary sum, total number of employees, the highest salary and the earliest startdate
 db.emp.aggregate(
 [{
      $group: {
@@ -297,3 +297,186 @@ db.emp.aggregate( [
     }
   }
 ])
+
+
+
+
+-- create new collection (similar to materialized view) from query
+-- consisting of complex documents with department with array of nested employees
+db.dept.aggregate(
+[  {$lookup:
+      {
+         from:"emp",
+         localField:"deptno",
+         foreignField:"DEPTNO",
+         as:"emps"
+     }
+   }  
+, {$out: "departments" 
+  }
+]
+)
+
+-- inspect documents in departments
+db.departments.find()
+
+-- find department that contains employee named KING
+db.departments.find( {"emps.ENAME":"KING"})
+
+-- now to only find KING (and not all employees in the department)
+db.departments.aggregate(
+[
+  {$unwind: {path:"$emps"}}  
+, {$match: { "emps.ENAME": "KING"}}
+, {$project: {
+        "EMPNO": "$emps.EMPNO",
+        "JOB": "$emps.JOB",
+        "ENAME": "$emps.ENAME",
+        "STARTDATE": "$emps.startdate",
+        "DNAME": 1
+    }
+   }
+]
+)
+
+
+-- find the names of all managers (in the complex documents with DEPT master and EMP details)
+db.departments.aggregate(
+[
+  {$unwind: {path:"$emps"}}  
+, {$match: { "emps.JOB": "MANAGER"}}
+, {$project: {
+        "ENAME": "$emps.ENAME",
+    }
+   }
+]
+)
+
+-- find all employees who are not in department 10, with their name and salary and sorted alphabetically by name
+db.departments.aggregate(
+[
+   {$match: { "DEPTNO": {$ne:10}}}
+ , {$unwind: {path:"$emps"}}  
+ , {$project: {
+        "ENAME": "$emps.ENAME",
+        "SAL": "$emps.SAL",
+        "DEPTNO": 1,
+    }
+   }
+ , {$sort : {"ENAME":1}}
+]
+)
+
+-- against the nested documents, perform aggegration
+-- total salary sum, total number of employees, the highest salary and the earliest startdate, per department
+
+db.departments.aggregate(
+[
+   {$unwind: {path:"$emps"}}  
+,  {$group:{ _id: '$deptno'
+           , total_salary_sum : {$sum: "$emps.SAL"}
+           , total_staff_count : {$sum: 1}
+           , max_sal : {$max: "$emps.SAL"}
+           , min_startdate : {$min: "$emps.startdate"}
+           }
+   }
+]
+)
+
+-- add geospatial data for departments (longitude, lattitude)
+db.dept.findAndModify({
+    query: { loc: "NEW YORK" },
+    update: { $set: { "location" : {
+                         "type" : "Point",
+                         "coordinates" : [ -73.935242, 40.730610 ]                         
+                         } 
+             } },
+    upsert: true
+})
+
+db.dept.findAndModify({
+    query: { loc: "DALLAS" },
+    update: { $set: { "location" : {
+                         "type" : "Point",
+                         "coordinates" : [ -96.8005, 32.7801 ]                         
+                         } 
+             } },
+    upsert: true
+})
+
+db.dept.findAndModify({
+    query: { loc: "BOSTON" },
+    update: { $set: { "location" : {
+                         "type" : "Point",
+                         "coordinates" : [ -71.0598, 42.3584 ]                         
+                         } 
+             } },
+    upsert: true
+})
+
+db.dept.findAndModify({
+    query: { loc: "CHICAGO" },
+    update: { $set: { "location" : {
+                         "type" : "Point",
+                         "coordinates" : [ -87.6298, 41.8781 ]                         
+                         } 
+             } },
+    upsert: true
+})
+
+
+-- create index 
+db.dept.ensureIndex( { location : "2dsphere" } );
+
+-- find departments within 500 km from Washington DC ( [ -77.0364, 38.8951 ])
+-- NOTE: the $near operator requires an index.
+db.dept.find(
+  {
+    location : {
+      $near : {
+        $geometry : { 
+          type : "Point" , 
+          coordinates : [ -77.0364, 38.8951 ] 
+        }, 
+        $maxDistance : 500000
+      }
+    }
+  }
+ )   
+
+-- to also get the distance from Washington DC to the department(s), use aggregation with $geoNear
+-- we find all points within 500000 meter from Washington DC and get the distance for each department in the property distanceFromTarget, in km (because of the distanceMultiplier that converts from meter to kilometer)
+db.dept.aggregate([
+    { "$geoNear": {
+        "near": {
+            "type": "Point",
+            "coordinates": [ -77.0364, 38.8951 ] 
+        }, 
+        "maxDistance": 500000,
+        "spherical": true,
+        "distanceField": "distanceFromTarget",     
+        "distanceMultiplier": 0.001
+     }}
+]).pretty()
+
+-- to list all departments, ordered by their distance from Washington DC 
+db.dept.aggregate([
+    { "$geoNear": {
+        "near": {
+            "type": "Point",
+            "coordinates": [ -77.0364, 38.8951 ] 
+        }, 
+        "spherical": true,
+        "distanceField": "distanceFromTarget",     
+        "distanceMultiplier": 0.001
+     }}
+ , {$sort : {"distanceFromTarget":1}}
+,  {$project: {
+        _id: 0,
+        dname: 1,
+        loc: 1,
+        "distance from Washington DC": { $trunc : "$distanceFromTarget"},
+    }
+   }
+])
+
