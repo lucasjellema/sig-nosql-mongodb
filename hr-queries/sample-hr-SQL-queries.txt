@@ -128,15 +128,23 @@ CREATE INDEX emp_bio_idx ON emp(bio) INDEXTYPE IS CTXSYS.CONTEXT;
 -- multicolumn text index: https://blogs.oracle.com/searchtech/entry/indexing_data_from_multiple_tables 
 
 exec ctx_ddl.drop_preference(   'my_mcds' )
-exec ctx_ddl.create_preference( 'my_mcds', 'multi_column_datastore' )
 
+exec ctx_ddl.create_preference( 'my_mcds', 'multi_column_datastore' )
 exec ctx_ddl.set_attribute(     'my_mcds', 'columns', 'bio, ename, job' )
+
+-- to support stemming 
+execute ctxsys.ctx_ddl.create_preference('my_lexer','BASIC_LEXER');
+execute ctxsys.ctx_ddl.set_attribute('my_lexer','index_stems','1');
+
+execute ctxsys.ctx_ddl.create_preference('my_wordlist','BASIC_WORDLIST');
+execute ctxsys.ctx_ddl.set_attribute('my_wordlist','stemmer','ENGLISH');
+
 
 --  It makes no difference which column we create the index on,
 --  we could have included a "dummy" column for this purpose if we wanted
 create index emp_txt_idx on emp( ename )
 indextype is ctxsys.context
-parameters( 'datastore my_mcds' )
+parameters( 'datastore my_mcds  WORDLIST my_wordlist LEXER my_lexer ' )
 
 
 update emp
@@ -217,3 +225,92 @@ SELECT empno
 ,      SCORE(1)
 FROM   emp 
 WHERE  CONTAINS(ename, 'king', 1) > 0;
+
+
+
+
+create or replace type emp_t as object
+( EMPNO            NUMBER(4)      
+, ENAME              VARCHAR2(10)   
+, JOB                VARCHAR2(9)    
+, MGR                NUMBER(4)      
+, SAL                NUMBER(7,2)    
+, COMM               NUMBER(7,2)    
+, STARTDATE          DATE
+)
+
+create or replace type emp_tbl_t as  table of emp_t    
+
+create materialized view departments
+BUILD IMMEDIATE 
+REFRESH FORCE 
+ON DEMAND 
+as 
+select deptno
+,      dname
+,      loc
+,      cast ( multiset ( select empno, ename, job, mgr, sal, comm, hiredate
+                         from   emp e
+                         where  e.deptno = d.deptno) as emp_tbl_t) staff
+from   dept d
+
+
+-- find department with employee KING
+
+
+select d.deptno
+  ,      d.dname
+  ,      d.loc
+  from   departments d
+  where ( select count(*) from table(d.staff) e where e.ename ='KING') >0
+
+or
+
+with king_checked_depts as
+( select d.deptno
+  ,      d.dname
+  ,      d.loc
+  ,      ( select count(*) from table(d.staff) e where e.ename ='KING') king_count 
+  from   departments d
+)
+select *
+from   king_checked_depts
+where  king_count > 0
+ 
+
+-- find KING in nested collection
+select d.deptno
+,      d.dname
+,      d.loc
+,      staff.*
+from   departments d
+,      table(d.staff) staff
+where  staff.ename = 'KING'
+
+-- find KING in nested collection
+select staff.ename
+from   departments d
+,      table(d.staff) staff
+where  staff.job = 'MANAGER'
+
+-- all staff not in department 10, order by ename 
+select staff.ename
+,      staff.sal
+,      d.deptno
+from   departments d
+,      table(d.staff) staff
+where  d.deptno != 10
+order
+by     staff.ename
+
+
+--  
+select d.deptno
+,      sum(staff.sal) total_salary_sum
+,      count(staff.empno) total_staff_count
+,      max(staff.sal) max_sal
+,      min(staff.startdate) min_startdate
+from   departments d
+,      table(d.staff) staff
+group
+by     d.deptno
