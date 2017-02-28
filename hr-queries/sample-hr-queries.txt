@@ -54,7 +54,7 @@ db.emp.find({"DEPTNO":{$ne: 10} },{ENAME:1, SAL:1, DEPTNO:1}).sort({'ENAME':1})
 db.emp.update({}, { $unset: {HIREDATE : ""} })
 
 
--- list everyone hired after January 1st 1983 or later
+-- list everyone hired after January 1st 1983
 db.emp.find(
 {"startdate" :{$gt: new Date('1983-01-01') }}
 )
@@ -71,34 +71,14 @@ db.emp.aggregate(
  [ 
   {$project: {
         "ENAME": 1,
-        "JOB": 1,
-        "startdate": 1,
-        "startmonth": { $month: "$startdate"}
+        "startmonth": { $month: "$startdate"},
+        "startyear": { $year: "$startdate"}
     }
   }
 ]
 )
 
 
-use hr
-
--- create stored function
-
-db.system.js.save({ 
-   "_id": "squareThis", 
-   "value": function(a) { return a*a } 
-})
-
--- load function in current database
-
-db.loadServerScripts();
-
--- invoke function in the shell
-
-squareThis(10);
-
--- note: functions can be invoked in $where and $mapReduce
--- not in aggregate and find
 
 
 -- some aggregates
@@ -586,3 +566,27 @@ db.emp.aggregate(
      ]
  )
  
+
+
+
+ -- bonus
+
+ use hr
+
+-- create stored function
+
+db.system.js.save({ 
+   "_id": "squareThis", 
+   "value": function(a) { return a*a } 
+})
+
+-- load function in current database
+
+db.loadServerScripts();
+
+-- invoke function in the shell
+
+squareThis(10);
+
+-- note: functions can be invoked in $where and $mapReduce
+-- not in aggregate and find

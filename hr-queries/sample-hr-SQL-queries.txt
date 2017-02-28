@@ -1,0 +1,219 @@
+-- assuming access to the Oracle SCOTT schema with tables EMP and DEPT
+-- if necessary, use script scott_build.sql to create these tables
+
+
+-- GEO
+
+-- add geospatial data for departments (longitude, lattitude)
+alter table dept
+add (geo_location SDO_GEOMETRY)
+
+-- see about Locator: https://docs.oracle.com/cd/E17781_01/appdev.112/e18750/xe_locator.htm#XELOC576
+-- Examples of SDO_GTYPE values include 2001 for a two-dimensional point
+-- The SRID value 8307 is associated with the widely used WGS84 longitude/latitude coordinate system.
+
+update dept
+set    geo_location = SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE (-96.8005, 32.7801,NULL), NULL, NULL)
+where  loc = 'DALLAS'
+
+update dept
+set    geo_location = SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE (-73.935242, 40.730610,NULL), NULL, NULL)
+where  loc = 'NEW YORK'
+
+update dept
+set    geo_location = SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE ( -71.0598, 42.3584,NULL), NULL, NULL)
+where  loc = 'BOSTON'
+
+update dept
+set    geo_location = SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE (-87.6298, 41.8781,NULL), NULL, NULL)
+where  loc = 'CHICAGO'
+
+-- For each spatial column (type SDO_GEOMETRY), you must insert an appropriate row into the USER_SDO_GEOM_METADATA view to reflect the dimensional information for the area in which the data is located. You must do this before creating spatial indexes
+
+-- The USER_SDO_GEOM_METADATA view has the following definition:
+-- (   TABLE_NAME   VARCHAR2(32),
+--  COLUMN_NAME  VARCHAR2(32),
+--  DIMINFO      SDO_DIM_ARRAY,
+--  SRID         NUMBER
+--);
+
+-- insert dimensional information for the  spatial column
+-- the dimensional range is the entire Earth, and the coordinate system is the widely used WGS84 (longitude/latitude) system (spatial reference ID = 8307
+
+INSERT INTO USER_SDO_GEOM_METADATA 
+(TABLE_NAME, COLUMN_NAME, DIMINFO, SRID) 
+VALUES ('DEPT', 'GEO_LOCATION', 
+   SDO_DIM_ARRAY 
+     (SDO_DIM_ELEMENT('LONG', -180.0, 180.0, 0.5), 
+     SDO_DIM_ELEMENT('LAT', -90.0, 90.0, 0.5)), 
+   8307);
+
+
+-- create index 
+
+CREATE INDEX dept_spatial_idx 
+ON dept(geo_location)
+INDEXTYPE IS mdsys.spatial_index;
+
+-- find two closest neighbouring departments for NEW YORK
+SELECT /*+ordered*/
+       d.deptno,
+       d.loc,
+       dn.deptno neighbour_deptno,
+       dn.loc neighbour_loc,
+       sdo_nn_distance (1) distance
+FROM   dept d
+       cross join
+       dept dn
+WHERE  d.deptno = 10 /* NEW YORK */
+and    dn.deptno !=  10
+AND    sdo_nn /* is dn in set of 3 closest neighbours to d */
+       (dn.geo_location, d.geo_location, 'sdo_num_res=3', 1) = 'TRUE'
+ORDER 
+BY    distance;
+
+-- find departments within 500 km from Washington DC ( [ -77.0364, 38.8951 ])
+-- THIS WILL NOT WORK BECAUSE there needs to be a spatial_index on both value fed to sdo_nn
+SELECT /*+ordered*/
+       d.deptno,
+       d.loc,
+       sdo_nn_distance (1) distance
+FROM   dept d
+WHERE  sdo_nn /* is dn in set of 3 closest neighbours to d */
+       ( SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE ( -77.0364, 38.8951,NULL), NULL, NULL)
+       , d.geo_location, 'sdo_num_res=3', 1) = 'TRUE'
+ORDER 
+BY    distance;
+
+-- however, this will work:
+-- list all departments, ordered by their distance from Washington DC 
+SELECT d.loc
+,      SDO_GEOM.SDO_DISTANCE
+       ( SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE ( -77.0364, 38.8951,NULL), NULL, NULL) /* Washington DC */
+       , d.geo_location
+       , 0.005
+       , 'unit=KM'
+       ) "distance from Washington"
+from   dept d
+order 
+by     2
+
+
+-- we find all departments  within 500 km from Washington DC and get the distance for each department in the property distance in km 
+with d as
+( SELECT d.loc
+  ,      SDO_GEOM.SDO_DISTANCE
+         ( SDO_GEOMETRY(2001, 8307,SDO_POINT_TYPE ( -77.0364, 38.8951,NULL), NULL, NULL)
+         , d.geo_location
+         , 0.005
+         , 'unit=KM'
+         ) distance
+  from   dept d
+  order 
+  by     2
+)
+select d.*
+from   d
+where  d.distance < 500
+
+-- Oracle Text - see for example: https://docs.oracle.com/cd/B28359_01/text.111/b28303/ind.htm 
+
+
+alter table emp
+add (bio varchar2(4000))
+
+CREATE INDEX emp_bio_idx ON emp(bio) INDEXTYPE IS CTXSYS.CONTEXT;
+
+
+-- multicolumn text index: https://blogs.oracle.com/searchtech/entry/indexing_data_from_multiple_tables 
+
+exec ctx_ddl.drop_preference(   'my_mcds' )
+exec ctx_ddl.create_preference( 'my_mcds', 'multi_column_datastore' )
+
+exec ctx_ddl.set_attribute(     'my_mcds', 'columns', 'bio, ename, job' )
+
+--  It makes no difference which column we create the index on,
+--  we could have included a "dummy" column for this purpose if we wanted
+create index emp_txt_idx on emp( ename )
+indextype is ctxsys.context
+parameters( 'datastore my_mcds' )
+
+
+update emp
+set    bio = q'[Gerald Ford was born on July 14, 1913, in Omaha, Nebraska, as Leslie Lynch King Jr. In just weeks, he was whisked away by his mother, Dorothy Ayer Gardner, to her parents' home in Grand Rapids, Michigan. A plucky woman who would not tolerate abuse, she divorced his father, Leslie Lynch King Sr., within the year, and less than three years later, was married to Gerald Rudolff Ford, a local paint company salesman, from whence Jerry Jr. got his name—although it was not made legal until he was 22 years old. A star college football player, he served in the Navy during WWII. Elected to the House of Representatives in 1948, Ford represented Michigan's 5th District for nearly 25 years before suddenly finding himself at the crossroads of history. He was elevated to vice president, and then became the 38th U.S. president due to Richard Nixon's involvement in the Watergate scandal and subsequent resignation. Ford was defeated by Jimmy Carter in the 1976 election. He died in California in 2006.]'
+where  ename = 'KING'
+
+update emp
+set    bio = q'[Jamaican sprinter Yohan Blake holds the world record for the 4-by-100-meter relay. In 2012, he won a silver medal in both the 100-meter and 200-meter races, losing to rival and fellow Jamaican Usain Bolt in both events. Famed sprinter Yohan Blake, nicknamed 'The Beast' by fans, was born on December 26, 1989 in St. James, Jamaica. Blake began running competitively in the 100 and 200 meters at a young age. In 2009, he tested positive for methylaxanthine at the Jamaican Championships, and was banned for three months. He has since won various honors, including two gold medals at the 2011 World Championships, in the 100 and the 4-by-100-meter relay. Blake holds the record in the 4-by-100-meter relay and the national junior record in the 100. His best time in the 100 is 9.75 seconds. At the 2012 Summer Olympics, he won a silver medal in the 100 meters with a time of 9.75 seconds, just shy of his rival Usain Bolt's 9.63 seconds. Similarly, in the 200-meter race, Blake finished second to Bolt, taking the silver.]'
+where  ename = 'BLAKE'
+
+update emp
+set    bio = q'[Harrison Ford is one of Hollywood's leading men, with an acting career that has spanned nearly 40 years and included iconic roles such as Indiana Jones and Han Solo.]'
+where  ename = 'FORD'
+
+
+update emp
+set    bio = q'[Tom Jones is a Welsh rock, pop and soul singing legend best known as an international hit maker over the last five decades. His popular singles include "It's Not Unusual," "Green Green Grass of Home," "Delilah," "Till" and "A Boy From Nowhere."]'
+where  ename = 'JONES'
+
+
+update emp
+set    bio = q'[American Founding Father Samuel Adams helped organize the Boston Tea Party and signed the U.S. Declaration of Independence. Samuel Adams was born on September 27, 1722, in Boston, Massachusetts. A strong opponent of British taxation, Adams helped formulate resistance to the Stamp Act and played a vital role in organizing the Boston Tea Party. He was a second cousin of U.S. President John Adams, with whom he urged a final break from Great Britain, and a signee of the U.S. Declaration of Independence. Adams died on October 2, 1803, in Boston.]'
+where  ename = 'ADAMS'
+
+update emp
+set    bio = q'[King James IV unified Scotland under his rule, provided laws, advanced culture and learning and positioned the country as a major player in European politics. King of Scotland from 1488 to 1513, James IV unified the country under his rule through enforcement and political and cultural advancements. While Scotland had a tense relationship with England under King Henry VII, relations improved with James’s marriage to Henry’s daughter, Margaret Tudor. The tide reversed when James allied himself with England’s arch enemy, France, and went to war with Henry VIII. James was killed in the Battle of Flodden on September 9, 1513.]'
+where  ename = 'JAMES'
+
+update emp
+set    bio = q'[Bandleader Glenn Miller inspired the World War II generation and boosted morale with many popular songs. Born in 1904 in Iowa, bandleader and musician Glenn Miller inspired the World War II generation. He was one of the most popular bandleaders in the late 1930s and early 1940s with such songs as "Moonlight Serenade" and "Tuxedo Junction." In 1942, Miller enlisted in the U.S. Army and was assigned to lead the Army Air Force Band. He boosted the morale of the troops with his many popular songs before mysteriously disappearing on a flight from England to Paris, France. Miller's original recordings continue to sell millions of copies. He died on December 15, 1944.]'
+where  ename = 'MILLER'
+
+-- synchronize the index
+begin
+  ctx_ddl.sync_index('emp_bio_idx', '2M');
+end;
+
+-- or (crude) rebuild it
+ALTER INDEX emp_bio_idx REBUILD
+
+-- synchronize the multi_column index
+exec ctx_ddl.sync_index( 'emp_txt_idx' );
+
+-- find employees with France in their bio
+SELECT empno
+,      bio 
+,      SCORE(1)
+FROM   emp 
+WHERE  CONTAINS(bio, 'France', 1) > 0;
+
+-- what about Ford in the bio
+SELECT empno
+,      bio 
+,      SCORE(1)
+FROM   emp 
+WHERE  CONTAINS(bio, 'ford', 1) > 0;
+
+-- no literal mention of the word lead, but leading triggers as well
+SELECT empno
+,      bio 
+,      SCORE(1)
+FROM   emp 
+WHERE  CONTAINS(bio, 'lead', 1) > 0;
+
+-- this will find all employees who have MANAGER as job or who have a word stemmed from manage in their bio (or who happened to be called manager)
+SELECT empno
+,      job
+,      bio 
+,      SCORE(1)
+FROM   emp 
+WHERE  CONTAINS(ename, 'manager', 1) > 0;
+
+-- search on KING - and find a president... 
+SELECT empno
+,      ename
+,      job
+,      bio 
+,      SCORE(1)
+FROM   emp 
+WHERE  CONTAINS(ename, 'king', 1) > 0;
