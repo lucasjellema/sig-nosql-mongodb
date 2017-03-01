@@ -2,6 +2,49 @@
 -- if necessary, use script scott_build.sql to create these tables
 
 
+
+-- create stored function
+db.system.js.save({ 
+   "_id": "salaryCap", 
+   "value": function(job) { return job=='CLERK'?1000
+                                       :(job=='ANALYST'?3500
+                                             :(job=='SALESMAN'?2000
+                                                   :(job=='MANAGER'?3000
+                                                         :10000)
+                                              )
+                                        )
+                            ;
+                          } 
+})
+
+-- load function in current database
+db.loadServerScripts();
+
+db.emp.find( { $where : " this.SAL > salaryCap(this.JOB)"}, {ENAME:1, SAL:1, JOB:1})
+
+create or replace 
+function salary_cap 
+(p_job in varchar2) 
+return number
+is
+begin
+  return 
+  case p_job
+  when 'CLERK' then 1000
+  when 'ANALYST' then 3500
+  when 'SALESMAN' then 2000
+  when 'MANAGER' then 3000
+  else  10000 
+  end;
+end salary_cap;
+
+
+select ename
+,      sal
+,      job
+from   emp
+where  sal > salary_cap( job)
+
 -- GEO
 
 -- add geospatial data for departments (longitude, lattitude)
