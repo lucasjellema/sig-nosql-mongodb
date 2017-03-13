@@ -6,15 +6,11 @@ import com.mongodb.client.MongoDatabase;
 
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.List;
 
 import org.bson.Document;
 import org.bson.BsonArray;
 import org.bson.BsonString;
 
-import com.mongodb.BasicDBList;
-import com.mongodb.BasicDBObject;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Filters;
 import com.mongodb.Block;
